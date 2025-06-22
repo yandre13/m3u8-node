@@ -1,11 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 import asyncio
 import json
 import re
 import uvicorn
+import httpx
 from typing import Optional, List, Dict, Any
 
 app = FastAPI(title="pCloud M3U8 Extractor", version="1.0.0")
@@ -143,7 +145,7 @@ class PCloudExtractor:
             
             return ExtractResponse(
                 success=True,
-                m3u8_url=best_m3u8.get('url') if best_m3u8 else None,
+                m3u8_url=f"/proxy-m3u8?url={best_m3u8.get('url')}" if best_m3u8 else None,
                 title=publink_data.get('name') or page_info.get('title'),
                 duration=publink_data.get('duration'),
                 thumbnail=publink_data.get('thumb1024'),
@@ -182,13 +184,56 @@ async def extract_pcloud(request: ExtractRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/proxy-m3u8")
+async def proxy_m3u8(url: str):
+    """Proxy para servir archivos M3U8 desde pCloud"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url)
+            if response.status_code == 200:
+                return StreamingResponse(
+                    iter([response.content]),
+                    media_type="application/vnd.apple.mpegurl",
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-cache"
+                    }
+                )
+            else:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch M3U8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/stream/{path:path}")
+async def stream_video(path: str):
+    """Proxy para segmentos de video"""
+    try:
+        # Reconstruir la URL del segmento
+        segment_url = f"https://{path}"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(segment_url)
+            if response.status_code == 200:
+                return StreamingResponse(
+                    iter([response.content]),
+                    media_type="video/mp2t",
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "max-age=3600"
+                    }
+                )
+            else:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch segment")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/health")
 async def health():
     return {"status": "OK", "service": "pCloud M3U8 Extractor"}
-
-@app.on_event("shutdown")
 async def shutdown_event():
     await extractor.close()
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
