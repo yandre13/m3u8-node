@@ -10,8 +10,8 @@ USER pptruser
 # Copiar package.json y package-lock.json
 COPY --chown=pptruser:pptruser package*.json ./
 
-# Instalar dependencias
-RUN npm ci --only=production && npm cache clean --force
+# Instalar dependencias usando npm ci (más rápido y seguro)
+RUN npm install --only=production && npm cache clean --force
 
 # Copiar el código de la aplicación
 COPY --chown=pptruser:pptruser . .
