@@ -1,23 +1,31 @@
-# Usar imagen base de Node.js con Puppeteer preinstalado
-FROM ghcr.io/puppeteer/puppeteer:21.5.2
+FROM python:3.11-slim
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Establecer directorio de trabajo
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Cambiar al usuario no root
-USER pptruser
+# Copiar requirements y instalar dependencias Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar package.json y package-lock.json
-COPY --chown=pptruser:pptruser package*.json ./
-
-# Instalar dependencias usando npm ci (más rápido y seguro)
-RUN npm install --only=production && npm cache clean --force
+# Instalar navegadores de Playwright
+RUN playwright install chromium
+RUN playwright install-deps chromium
 
 # Copiar el código de la aplicación
-COPY --chown=pptruser:pptruser . .
+COPY . .
+
+# Crear usuario no-root
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
 
 # Exponer el puerto
-EXPOSE 3000
+EXPOSE 8000
 
 # Comando para ejecutar la aplicación
-CMD ["node", "index.js"]
+CMD ["python", "main.py"]
